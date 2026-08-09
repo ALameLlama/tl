@@ -125,6 +125,8 @@ local record Node
    -- bidirectional inference
    expected: Type
    expected_context: Node.ExpectedContext
+   -- stable checker binding type for declaration emitters
+   declaration_type: Type
 
    key: Node
    value: Node

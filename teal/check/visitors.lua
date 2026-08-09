@@ -829,6 +829,7 @@ visit_node.cbs = {
       before = function(self, node)
          local name = node.var.tk
          local resolved, aliasing = self:get_typedecl(node.value)
+         node.var.declaration_type = resolved
          local var = self:add_var(node.var, name, resolved, node.var.attribute)
          if aliasing then
             var.aliasing = aliasing
@@ -845,6 +846,7 @@ visit_node.cbs = {
          local name = node.var.tk
          if node.value then
             local resolved, aliasing = self:get_typedecl(node.value)
+            node.var.declaration_type = resolved
             local added = self:add_global(node.var, name, resolved)
             if resolved.typename == "invalid" then
                return
@@ -895,6 +897,8 @@ visit_node.cbs = {
 
             local ok, t = self:determine_declaration_type(var, node, infertypes, i)
 
+            var.declaration_type = t
+
             if var.attribute == "close" then
                if not type_is_closable(t) then
                   self.errs:add(var, "to-be-closed variable " .. var.tk .. " has a non-closable type %s", t)
@@ -940,6 +944,9 @@ visit_node.cbs = {
          local infertypes = get_assignment_values(node, valtuple, #node.vars)
          for i, var in ipairs(node.vars) do
             local _, t, is_inferred = self:determine_declaration_type(var, node, infertypes, i)
+            if node.exps or node.decltuple.tuple[i] then
+               var.declaration_type = t
+            end
 
             if var.attribute == "close" then
                self.errs:add(var, "globals may not be <close>")
@@ -1531,6 +1538,7 @@ visit_node.cbs = {
             rets = self.get_rets(rets),
          }))
 
+         node.declaration_type = t
          self:add_var(node, node.name.tk, t)
          return t
       end,
@@ -1573,6 +1581,7 @@ visit_node.cbs = {
             if typ then
                if typ.typename == "function" then
                   node.is_predeclared_local_function = true
+                  node.declaration_type = typ
                elseif not self.feat_lax then
                   self.errs:add(node, "cannot declare function: type of " .. node.name.tk .. " is %s", typ)
                end
@@ -1599,11 +1608,13 @@ visit_node.cbs = {
             return NONE
          end
 
-         self:add_global(node, node.name.tk, wrap_generic_if_typeargs(node.typeargs, a_function(node, {
+         local t = wrap_generic_if_typeargs(node.typeargs, a_function(node, {
             min_arity = self.feat_arity and node.min_arity or 0,
             args = args,
             rets = self.get_rets(rets),
-         })))
+         }))
+         node.declaration_type = t
+         self:add_global(node, node.name.tk, t)
 
          return NONE
       end,
@@ -1695,7 +1706,8 @@ visit_node.cbs = {
 
          local open_t, open_v, owner_name = self:find_record_to_extend(node.fn_owner)
          local open_k = owner_name .. "." .. node.name.tk
-         local rfieldtype = rtype.fields[node.name.tk]
+         local declaration_type = rtype.fields[node.name.tk]
+         local rfieldtype = declaration_type
          if rfieldtype then
             rfieldtype = self:to_structural(rfieldtype)
 
@@ -1732,6 +1744,7 @@ visit_node.cbs = {
 
 
                rtype.fields[node.name.tk] = fn_type
+               declaration_type = fn_type
                table.insert(rtype.field_order, node.name.tk)
 
                if self.collector then
@@ -1750,6 +1763,8 @@ visit_node.cbs = {
             end
             open_v.implemented[open_k] = true
          end
+
+         node.declaration_type = declaration_type
 
       end,
       after = function(self, node, _children)
